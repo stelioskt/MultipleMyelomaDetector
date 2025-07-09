@@ -1,0 +1,38 @@
+# config.yml
+
+dataset_config:
+  folder_path: '/home/georgeb/data'
+  train_ratio: 0.8
+  val_ratio: 0.1
+  test_ratio: 0.1
+
+dataloader_config:
+  batch_size: 2
+  num_workers: 0
+  shuffle: True
+
+unet_config:
+  base_channels: 32
+  kernel_size: 3
+  num_layers: 4
+  stride: 1
+  use_residual: "True"
+  use_attention: "False"
+  use_recurrent: "True"
+  recurrent_timesteps: 3
+  use_dense_block: "False"
+  dense_num_layers: 4
+  use_inception_block: "False"
+  
+training_config:
+  device: "cuda"
+  num_epochs: 1000
+  learning_rate: 0.0001
+  checkpoint_dir: '/home/georgeb/code/patch_based_framework/results/9+1_BS=WHOLE_IMAGE/MAIN+REC_t=3+RES_1000_epochs_adamw_lr=0.0001/CHECKPOINTS/'
+  
+testing_config:
+  output_dir: '/home/georgeb/code/patch_based_framework/results/9+1_BS=WHOLE_IMAGE/MAIN+REC_t=3+RES_1000_epochs_adamw_lr=0.0001/OUTPUTS/'
+
+logging_config:
+  log_interval: 10
+  log_dir: '/home/georgeb/code/patch_based_framework/results/9+1_BS=WHOLE_IMAGE/MAIN+REC_t=3+RES_1000_epochs_adamw_lr=0.0001/TENSOR_LOGGING/'

@@ -128,6 +128,9 @@ def relabel_components(image, save_path=None, std_threshold=2.0, min_voxels = 10
 
     # Convert back to SimpleITK image
     unique_labels = np.unique(reordered_lbl_array)
+    unique_labels = unique_labels[unique_labels != 0]  # Exclude background (label 0)
+    print(f"Unique labels after relabeling: {unique_labels}")
+    
     reordered_image = sitk.GetImageFromArray(reordered_lbl_array)
     reordered_image.CopyInformation(image)
     reordered_image = sitk.Cast(reordered_image, sitk.sitkUInt8)

@@ -47,7 +47,7 @@ total_mask = sitk.Image(resampled_img.GetSize(), sitk.sitkUInt8)
 total_mask.CopyInformation(resampled_img)
 
 # For every connected component (vertebral body)
-for i in range(1, 3):
+for i in range(1, len(unique_labels)):
     # Create a binary mask for the current vertebral body
     vrt = lbl_ar == i
     print(f"Processing label {i}")

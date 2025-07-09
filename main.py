@@ -120,32 +120,3 @@ gaussian_binary = sitk.Cast(gaussian > 0.3, sitk.sitkUInt8)
 gaussian_binary = sitk.Mask(gaussian_binary, lbl_img)
 # Find the different connected components in the final mask
 final_connected_components, unique_final_labels = get_valid_lesions(gaussian_binary, os.path.join(res_path, 'final_mask.nii.gz'))
-
-
-
-
-
-
-
-
-
-# ip_path = '/media/georgeb/4 TB WD/PhD/Data/harmonized_data_registration/MOBI_T1_DIXON/IP/Patient_8.nii.gz'
-# op_path = '/media/georgeb/4 TB WD/PhD/Data/harmonized_dataset_transformations/MOBI_T1_DIXON/OP/Patient_8/result.nii'
-
-# # ff_img = compute_fat_fraction(ip_path, op_path, os.path.join(res_path, 'fat_fraction_without_abs.nii.gz'))
-# # ff_img = sitk.WriteImage(ff_img, os.path.join(res_path, 'fat_fraction.nii.gz'))
-
-# with_abs_ff_img_path = os.path.join(res_path, 'fat_fraction_with_abs.nii.gz')
-# # without_abs_ff_img_path = os.path.join(res_path, 'fat_fraction_without_abs.nii.gz')
-
-# ff_img = sitk.ReadImage(with_abs_ff_img_path)
-# ff_img, _ = resample_image(ff_img, target_spacing)
-# print(ff_img.GetSize())
-# print(segmented_adc_image.GetSize())
-# ff_img_masked = sitk.Mask(ff_img, segmented_adc_image)
-# ff_array = sitk.GetArrayFromImage(ff_img_masked)
-
-# segmented_ff_array = np.where((ff_array <= 0.1), 0, 1)
-# segmented_ff_mask = sitk.GetImageFromArray(segmented_ff_array.astype(np.uint8))
-# # Align the segmented fat fraction mask with the original image
-# segmented_ff_mask.CopyInformation(ff_img)
