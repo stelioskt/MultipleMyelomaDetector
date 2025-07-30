@@ -1,5 +1,7 @@
 import numpy as np
+import os
 import SimpleITK as sitk
+from skimage import exposure
 
 def resample_image(image, target_spacing, interpolation='linear'):
     """
@@ -140,7 +142,7 @@ def relabel_components(image, save_path=None, std_threshold=2.0, min_voxels = 10
     if save_path:
         sitk.WriteImage(reordered_image, save_path)
 
-    return reordered_image, unique_labels
+    return reordered_image
 
 
 def get_valid_lesions(image, save_path=None, min_diameter_mm=5.0, min_volume=200):
@@ -158,7 +160,6 @@ def get_valid_lesions(image, save_path=None, min_diameter_mm=5.0, min_volume=200
     """
     connected_components = sitk.ConnectedComponent(image)
     
-    spacing = connected_components.GetSpacing()  # (x, y, z)
     label_stats = sitk.LabelShapeStatisticsImageFilter()
     label_stats.Execute(connected_components)
 
@@ -196,3 +197,39 @@ def get_valid_lesions(image, save_path=None, min_diameter_mm=5.0, min_volume=200
         sitk.WriteImage(relabelled_image, save_path)
 
     return valid_labels, unique_labels
+
+#TODO: Add more preprocessing steps like bias field correction, denoising, etc.
+
+def preprocess_image(img):
+    # # --- Bias field correction (N4ITK) ---
+    # print("Applying N4 bias field correction to image…")
+    # mask = sitk.OtsuThreshold(img, 0, 1, 200)
+    # n4 = sitk.N4BiasFieldCorrectionImageFilter()
+    # img_n4 = n4.Execute(img, mask)
+    # sitk.WriteImage(img_n4, os.path.join(res_path, 'img_n4.nii.gz'))
+
+    # # --- Denoising via anisotropic diffusion ---
+    # print("Applying anisotropic diffusion denoising…")
+    # denoise = sitk.CurvatureAnisotropicDiffusionImageFilter()
+    # denoise.SetTimeStep(0.0625)
+    # denoise.SetNumberOfIterations(5)
+    # denoise.SetConductanceParameter(3.0)
+    # img_denoised = denoise.Execute(img_n4)
+    # sitk.WriteImage(img_denoised, os.path.join(res_path, 'img_denoised.nii.gz'))
+
+    # --- Intensity normalization (zero mean, unit variance) ---
+    print("Normalizing intensities…")
+    norm_filter = sitk.NormalizeImageFilter()
+    img_norm = norm_filter.Execute(img)
+    # sitk.WriteImage(img_norm, os.path.join(res_path, 'img_normalized.nii.gz'))
+
+    # # --- Percentile-based Contrast Stretching ---
+    # print("Applying percentile contrast stretch…")
+    # arr = sitk.GetArrayFromImage(img_norm).astype(np.float32)
+    # p2, p98 = np.percentile(arr, (2, 98))
+    # arr_cs = exposure.rescale_intensity(arr, in_range=(p2, p98), out_range=(0.0, 1.0))
+    # img_cs = sitk.GetImageFromArray(arr_cs)
+    # img_cs.CopyInformation(img_norm)
+    # sitk.WriteImage(img_cs, os.path.join(res_path, 'img_contrast_stretch.nii.gz'))
+    
+    return img_norm

@@ -1,122 +1,165 @@
 import os
+import glob
+import logging
+import csv
+import torch
+import torch.nn.functional as F
 import numpy as np
-import SimpleITK as sitk
-from utils.preprocessing import *
+from sklearn.metrics import precision_score, recall_score, f1_score
+from torch_geometric.loader import DataLoader
+from torch_geometric.nn import GCNConv
+from torch.utils.data import random_split
 
+# === User-defined parameters ===
+GRAPH_DIR = "Dataset/Graphs"        # folder containing .pt graph files
+LOG_DIR = "Results/GCN_logs"        # where logs, CSV, and checkpoints go
+EPOCHS = 100
+BATCH_SIZE = 4
+HIDDEN_DIM = 32
+LEARNING_RATE = 1e-3
+TEST_RATIO = 0.2        # fraction of graphs to reserve for testing
+USE_CUDA = torch.cuda.is_available()
+DEVICE = torch.device("cuda" if USE_CUDA else "cpu")
 
-patient_id = 'Patient_1'
-num = int(patient_id.split('_')[1])
+# =================== Model definition ===================
 
-dwi_path = f'D:\\Thesis\\dataset_registered\\MOBI_DWI\\b900\\{patient_id}\\result.1.nii.gz'
-adc_path = f'D:\\Thesis\\dataset_registered\\MOBI_ADC\\{patient_id}\\{patient_id}.nii.gz'
-t1_path = f'D:\\Thesis\\dataset_registered\\MOBI_T1W_TSE\\{patient_id}.nii.gz'
-lbl_path = f'D:\\Thesis\\whole_spine_mask\\BOT_0{num:02d}.nii.gz'
-res_path = f'C:\\Repos\\Thesis\\RESULTS'
+#TODO: Architecture to be defined
 
+class GCN(torch.nn.Module):
+    def __init__(self, in_channels, hidden_channels, out_channels=2, dropout=0.5):
+        super().__init__()
+        self.conv1 = GCNConv(in_channels, hidden_channels)
+        self.conv2 = GCNConv(hidden_channels, out_channels)
+        self.dropout = dropout
 
-if not os.path.exists(res_path):
-    os.makedirs(res_path)
+    def forward(self, x, edge_index):
+        x = self.conv1(x, edge_index)
+        x = F.relu(x)
+        x = F.dropout(x, p=self.dropout, training=self.training)
+        x = self.conv2(x, edge_index)
+        return x
 
-# Read the images
-dwi = sitk.ReadImage(dwi_path)
-adc = sitk.ReadImage(adc_path)
-t1 = sitk.ReadImage(t1_path)
-lbl = sitk.ReadImage(lbl_path)
+# =================== Training & Evaluation routines ===================
+#TODO: Loss function to be defined, optimizer to be defined, scheduler to be defined
+def train_epoch(model, loader, optimizer, criterion, device):
+    model.train()
+    total_loss = 0.0
+    total_nodes = 0
+    for batch in loader:
+        batch = batch.to(device)
+        optimizer.zero_grad()
+        logits = model(batch.x, batch.edge_index)
+        loss = criterion(logits, batch.y)
+        loss.backward()
+        optimizer.step()
+        total_loss += loss.item() * batch.num_nodes
+        total_nodes += batch.num_nodes
+    return total_loss / total_nodes
 
-# Define the new size and isotropic spacing
-target_spacing = [1.0, 1.0, 1.0]
+@torch.no_grad()
+def eval_epoch(model, loader, device):
+    model.eval()
+    ys, preds = [], []
+    total_loss = 0.0
+    total_nodes = 0
+    for batch in loader:
+        batch = batch.to(device)
+        logits = model(batch.x, batch.edge_index)
+        loss = F.cross_entropy(logits, batch.y)
+        total_loss += loss.item() * batch.num_nodes
+        total_nodes += batch.num_nodes
 
-# Resample the images
-dwi,_ = resample_image(dwi, target_spacing)
-adc,_ = resample_image(adc, target_spacing)
-t1,_ = resample_image(t1, target_spacing)
-sitk.WriteImage(dwi, os.path.join(res_path, 'dwi_img.nii.gz'))
-sitk.WriteImage(adc, os.path.join(res_path, 'adc_img.nii.gz'))
-sitk.WriteImage(t1, os.path.join(res_path, 't1_img.nii.gz'))
-img_dims = dwi.GetSize()
-print(f"Resampled dwi image size: {img_dims[0]} x {img_dims[1]} x {img_dims[2]}")
+        ys.append(batch.y.cpu())
+        preds.append(logits.argmax(dim=1).cpu())
 
-# Resample the labels
-# We use k nearest in order to preserve the labels without distorions
-lbl,_ = resample_image(lbl, target_spacing, 'nearest')
-lbl.CopyInformation(dwi)
-lbl = sitk.Cast(lbl, sitk.sitkUInt8)
+    ys = torch.cat(ys).numpy()
+    preds = torch.cat(preds).numpy()
+    accuracy = (ys == preds).mean()
+    precision = precision_score(ys, preds, zero_division=0)
+    recall    = recall_score(ys, preds, zero_division=0)
+    f1        = f1_score(ys, preds, zero_division=0)
+    avg_loss  = total_loss / total_nodes if total_nodes > 0 else 0.0
 
-# Relabel the connected components in the spine mask
-print("Relabeling connected components")
-# Find connected components in the label image
-connected_components = sitk.ConnectedComponent(lbl)
-# Ensure valid and sorted labels based on Y-axis 
-lbl_img, unique_labels = relabel_components(connected_components, os.path.join(res_path, 'spine_mask.nii.gz'), min_voxels=1000, std_threshold=2.0)
+    return avg_loss, precision, recall, f1, accuracy
 
-# Crop the images to the bounding box of the labels
-dwi_spine_img = sitk.Mask(dwi, lbl_img)
-adc_spine_img = sitk.Mask(adc, lbl_img)
-t1_spine_img = sitk.Mask(t1, lbl_img)
-sitk.WriteImage(dwi_spine_img, os.path.join(res_path, 'dwi_spine_img.nii.gz'))
-sitk.WriteImage(adc_spine_img, os.path.join(res_path, 'adc_spine_img.nii.gz'))
-sitk.WriteImage(t1_spine_img, os.path.join(res_path, 't1_spine_img.nii.gz'))
+# =================== Main execution ===================
 
-# Process the ADC image
-print("\nLocating suspicious values from ADC image")
-# Keep only the voxels within the range [0.6, 1.2] and segment them
-adc_array = sitk.GetArrayFromImage(adc_spine_img)
-segmented_adc_array = np.where((adc_array >= 0.6) & (adc_array <= 1.2), 1, 0)
-segmented_adc_image = sitk.GetImageFromArray(segmented_adc_array.astype(np.uint8))
-segmented_adc_image.CopyInformation(adc)
-# Find the different connected components in the segmented ADC mask
-adc_connected_components, unique_adc_labels = get_valid_lesions(segmented_adc_image, os.path.join(res_path, 'adc_lesion.nii.gz'))
+def main():
+    # Setup logging
+    os.makedirs(LOG_DIR, exist_ok=True)
+    log_path = os.path.join(LOG_DIR, "train.log")
+    logging.basicConfig(
+        level=logging.INFO,
+        format="%(asctime)s %(levelname)s: %(message)s",
+        handlers=[
+            logging.FileHandler(log_path),
+            logging.StreamHandler()
+        ]
+    )
+    logging.info("Starting training")
 
+    # Load graphs
+    graph_files = sorted(glob.glob(os.path.join(GRAPH_DIR, "*.pt")))
+    dataset = [torch.load(f, weights_only=False) for f in graph_files]
+    logging.info(f"Loaded {len(dataset)} graph(s) from {GRAPH_DIR}")
 
-# Process the DWI image
-print("\nLocating suspicious values from DWI image")
-# Apply Otsu thresholding to the DWI image
-otsu = sitk.OtsuMultipleThresholdsImageFilter()
-otsu.SetNumberOfThresholds(4)
-otsu.SetNumberOfHistogramBins(256)
-otsu_mask = otsu.Execute(dwi_spine_img)
-# Keep only the highest two thresholds (3 and 4)
-otsu_les3 = otsu_mask == 3
-otsu_les4 = otsu_mask == 4
-otsu_les = otsu_les3 + otsu_les4
-# Find the different connected components in the segmented DWI mask
-dwi_connected_components, unique_dwi_labels = get_valid_lesions(otsu_les, os.path.join(res_path, 'dwi_lesion.nii.gz'))
+    # Split train/test by graph
+    n_test  = int(len(dataset) * TEST_RATIO)
+    n_train = len(dataset) - n_test
+    train_ds, test_ds = random_split(dataset, [n_train, n_test])
+    logging.info(f"Train graphs: {n_train}, Test graphs: {n_test}")
 
+    # Dataloaders
+    train_loader = DataLoader(train_ds, batch_size=BATCH_SIZE, shuffle=True)
+    test_loader  = DataLoader(test_ds,  batch_size=BATCH_SIZE)
 
-# Process the T1 image
-print("\nLocating suspicious values from T1 image")
-otsu = sitk.OtsuMultipleThresholdsImageFilter()
-otsu.SetNumberOfThresholds(4)
-otsu.SetNumberOfHistogramBins(256)
-otsu_mask = otsu.Execute(t1_spine_img)
-# Keep only the lowest threshold (1)
-otsu_les = otsu_mask == 1
-# Find the different connected components in the segmented T1 mask
-t1_connected_components, unique_t1_labels = get_valid_lesions(otsu_les, os.path.join(res_path, 't1_lesion.nii.gz'))
+    # Model, optimizer, loss with class weights
+    in_ch = dataset[0].num_node_features
+    model = GCN(in_ch, HIDDEN_DIM).to(DEVICE)
+    optimizer = torch.optim.Adam(model.parameters(), lr=LEARNING_RATE)
 
+    # Compute class weights from all training nodes
+    all_labels = torch.cat([d.y for d in train_ds]).long()
+    counts = torch.bincount(all_labels)
+    weights = (counts.sum() / (2 * counts.float())).to(DEVICE)
+    criterion = torch.nn.CrossEntropyLoss(weight=weights)
 
-# Combine the masks by intersecting the voxels that are present in at least two of the three images
-print("\nCombining the masks")
-t1_bin = (t1_connected_components > 0).astype(np.uint8)
-dwi_bin = (dwi_connected_components > 0).astype(np.uint8)
-adc_bin = (adc_connected_components > 0).astype(np.uint8)
-comb_mask = ((t1_bin + dwi_bin + adc_bin) >= 2).astype(np.uint8)
-comb_img = sitk.GetImageFromArray(comb_mask)
-comb_img.CopyInformation(t1_spine_img)
-# Find the different connected components in the combined mask
-comb_mask_components, unique_comb_labels = get_valid_lesions(comb_img, os.path.join(res_path, 'combined_mask.nii.gz'))
+    #TODO: Include segmentation metrics
 
+    # Prepare metrics CSV
+    metrics_csv = os.path.join(LOG_DIR, "metrics.csv")
+    with open(metrics_csv, "w", newline="") as f:
+        writer = csv.writer(f)
+        writer.writerow(["epoch", "train_loss", "test_loss", "test_accuracy", "test_precision", "test_recall", "test_f1"])
 
-# Apply morphological operations to the combined mask
-print("\nApplying morphological operations")
-img = sitk.GetImageFromArray(comb_mask_components)
-img.CopyInformation(t1_spine_img)
-# Apply binary morphological closing to fill small holes in the mask
-filtered = sitk.BinaryMorphologicalClosing(img, [1, 1, 1])  # radius in voxels
-# Apply Gaussian smoothing to the binary image
-gaussian = sitk.SmoothingRecursiveGaussian(sitk.Cast(filtered > 0, sitk.sitkFloat32), sigma=1.0)
-gaussian_binary = sitk.Cast(gaussian > 0.3, sitk.sitkUInt8)
-# Crop the image to the shape of the labels
-gaussian_binary = sitk.Mask(gaussian_binary, lbl_img)
-# Find the different connected components in the final mask
-final_connected_components, unique_final_labels = get_valid_lesions(gaussian_binary, os.path.join(res_path, 'final_mask.nii.gz'))
+    best_f1 = 0.0
+    best_model_path = os.path.join(LOG_DIR, "best_model.pt")
+
+    # Training loop
+    for epoch in range(1, EPOCHS + 1):
+        train_loss = train_epoch(model, train_loader, optimizer, criterion, DEVICE)
+        test_loss, prec, rec, f1, accuracy = eval_epoch(model, test_loader, DEVICE)
+
+        logging.info(
+            f"Epoch {epoch:03d} | "
+            f"Train Loss: {train_loss:.4f} | "
+            f"Test Loss: {test_loss:.4f} | "
+            f"Acc: {accuracy:.3f} P: {prec:.3f} R: {rec:.3f} F1: {f1:.3f}"
+        )
+
+        # Append metrics
+        with open(metrics_csv, "a", newline="") as f:
+            writer = csv.writer(f)
+            writer.writerow([epoch, train_loss, test_loss, prec, rec, f1])
+
+        # Checkpoint best model
+        if f1 > best_f1:
+            best_f1 = f1
+            torch.save(model.state_dict(), best_model_path)
+            logging.info(f"  New best model saved (F1={best_f1:.3f})")
+
+    logging.info("Training complete.")
+    logging.info(f"Best model: {best_model_path} (F1={best_f1:.3f})")
+
+if __name__ == "__main__":
+    main()

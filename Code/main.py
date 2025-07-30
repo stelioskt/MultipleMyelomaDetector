@@ -7,13 +7,11 @@ Created on Sat Mar  9 14:13:18 2024
 """
 import os
 import sys
-
 import torch
 import torch.optim as optim
 from torch.optim.lr_scheduler import LambdaLR
+from Modules import *
 
-# from torch.utils.data import DataLoader, random_split
-from hybrid_net_proj import *
 
 # Set up working directory and configuration
 wd= '/home/georgeb/Desktop/code/trans_unet_framework' #in-script input
@@ -123,7 +121,7 @@ trainer = train_val.Trainer(
 trainer.train(train_loader, val_loader, num_epochs=training_config['num_epochs'])
 
 # Testing 
-evaluator = eval_mod.ModelEvaluator(
+evaluator = eval.ModelEvaluator(
     trainer.model, 
     test_grid_samplers, 
     dataset_config['batch_size'],
