@@ -84,8 +84,6 @@ def clustering(patient_id, min_lesion_vox=10, min_fraction=0.1, max_voxel_diff=2
     # Now mask to spine on cropped volumes
     t1_spine_img = sitk.Mask(t1, lbl_img)
     t2_spine_img = sitk.Mask(t2, lbl_img)
-    sitk.WriteImage(t1_spine_img, os.path.join(res_path, 't1_spine_img.nii.gz'))
-    sitk.WriteImage(t2_spine_img, os.path.join(res_path, 't2_spine_img.nii.gz'))
 
     # ========= Supervoxel Segmentation =========
     t1_arr = sitk.GetArrayFromImage(t1_spine_img)
@@ -110,7 +108,7 @@ def clustering(patient_id, min_lesion_vox=10, min_fraction=0.1, max_voxel_diff=2
     # Save supervoxels
     supervox_img = sitk.GetImageFromArray(supervoxels.astype(np.int32))
     supervox_img.CopyInformation(t1_spine_img)
-    sitk.WriteImage(supervox_img, os.path.join(res_path, 'supervoxels.nii.gz'))
+    sitk.WriteImage(supervox_img, os.path.join(res_path, f'supervoxels_{patient_id}.nii.gz'))
 
     # ========= Label Extraction =========
     lesion_arr = sitk.GetArrayFromImage(lesion) > 0
