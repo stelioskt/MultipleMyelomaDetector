@@ -1,3 +1,5 @@
 SimpleITK
 scikit-image
 scipy
+torch
+torch-geometric
