@@ -31,13 +31,6 @@ def resample_image(image, target_spacing, interpolation='linear'):
 def calculate_fat_fraction_sitk(ip_image, op_image):
     """
     Calculate fat fraction images using T1 Dixon IP and OP images with SimpleITK.
-
-    Parameters:
-        ip_image (sitk.Image): In-phase image.
-        op_image (sitk.Image): Out-of-phase image.
-
-    Returns:
-        sitk.Image: Fat fraction image.
     """
     # Convert SimpleITK images to NumPy arrays
     ip_array = sitk.GetArrayFromImage(ip_image).astype(np.float32)
@@ -58,18 +51,10 @@ def calculate_fat_fraction_sitk(ip_image, op_image):
     return fat_fraction_image
 
 
-def relabel_components(image, save_path=None, std_threshold=2.0, min_voxels = 1000):
+def relabel_components(image, std_threshold=2.0, min_voxels = 1000):
     """
     Relabels connected components based on Y-axis position (head to pelvis),
     calculates volume and centroid, and optionally saves the relabeled image.
-    
-    Args:
-        image (sitk.Image): Input label image (components labeled).
-        save_path (str, optional): Path to save the relabeled image.
-        sd_threshold (float, optional): Standard deviation threshold for filtering components.
-        min_voxels (int, optional): Minimum number of voxels for a component to be considered valid.
-    Returns:
-        sitk.Image: New relabeled image.
     """
     # Get the unique labels in the image
     lbl_array = sitk.GetArrayFromImage(image)
@@ -136,11 +121,6 @@ def relabel_components(image, save_path=None, std_threshold=2.0, min_voxels = 10
     reordered_image = sitk.GetImageFromArray(reordered_lbl_array)
     reordered_image.CopyInformation(image)
     reordered_image = sitk.Cast(reordered_image, sitk.sitkUInt8)
-
-
-    # Save the new relabeled image if a path is given
-    if save_path:
-        sitk.WriteImage(reordered_image, save_path)
 
     return reordered_image
 

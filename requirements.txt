@@ -3,3 +3,5 @@ scikit-image
 scipy
 torch
 torch-geometric
+radiomics
+pyradiomics

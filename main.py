@@ -10,9 +10,9 @@ from torch_geometric.loader import DataLoader
 from torch_geometric.nn import GCNConv
 from torch.utils.data import random_split
 
-# === User-defined parameters ===
+# === User-defined parameters === 
 GRAPH_DIR = "Dataset/Graphs"        # folder containing .pt graph files
-LOG_DIR = "Results/GCN_logs"        # where logs, CSV, and checkpoints go
+LOG_DIR = "GCN_logs"        # where logs, CSV, and checkpoints go
 EPOCHS = 100
 BATCH_SIZE = 4
 HIDDEN_DIM = 32

@@ -33,35 +33,24 @@ def clustering(patient_id, min_lesion_vox=10, min_fraction=0.1, max_voxel_diff=2
     lbl,_ = resample_image(lbl, target_spacing, 'nearest')
     lesion, _ = resample_image(lesion, target_spacing, 'nearest')
 
-
-
     # Ensure mask metadata aligns with T1
     lbl.CopyInformation(t1)
     lesion.CopyInformation(t1)
     lbl = sitk.Cast(lbl, sitk.sitkUInt8)
 
-    # Relabel connected spine components
-    # REVIEW: This step could be ommited for the moment
+    # Compute connected spine components
     connected_components = sitk.ConnectedComponent(lbl)
-    lbl_img = relabel_components(
-        connected_components,
-        os.path.join(res_path, 'spine_mask.nii.gz'),
-        min_voxels=1000, 
-        std_threshold=2.0
-    )
+    lbl_img = relabel_components(connected_components)
 
     # ================== Align T1 and T2 ==================
     sh1 = t1.GetSize()[::-1]
     sh2 = t2.GetSize()[::-1]
-    # Compute per-axis difference
     diffs = [sh1[i] - sh2[i] for i in range(3)]
     abs_diffs = [abs(d) for d in diffs]
-    print(f"[{patient_id}] Pre-mask shapes: T1 {sh1}, T2 {sh2}, diffs {diffs}")
-
-    # Skip if any difference > max_voxel_diff
+    print(f"Pre-mask shapes: T1 {sh1}, T2 {sh2}, diffs {diffs}")
     if any(d > max_voxel_diff for d in abs_diffs):
-        print(f"[{patient_id}] Size mismatch exceeds {max_voxel_diff} voxels: {abs_diffs} → skipping")
-        return None, None, None, None
+        print(f"Size mismatch exceeds {max_voxel_diff} voxels: {abs_diffs} → skipping")
+        return None, None, None, None, None
 
     # Determine crop size = min shape
     min_shape = tuple(min(sh1[i], sh2[i]) for i in range(3))
@@ -77,24 +66,20 @@ def clustering(patient_id, min_lesion_vox=10, min_fraction=0.1, max_voxel_diff=2
     lesion  = roi.Execute(lesion)
 
     # After cropping, align metadata to T1 grid
-    t2.CopyInformation(t1)
-    lbl_img.CopyInformation(t1)
-    lesion.CopyInformation(t1)
+    for img in (t2, lbl_img, lesion):
+        img.CopyInformation(t1)
 
-    # Now mask to spine on cropped volumes
-    t1_spine_img = sitk.Mask(t1, lbl_img)
-    t2_spine_img = sitk.Mask(t2, lbl_img)
+    # Convert to arrays
+    t1_arr    = sitk.GetArrayFromImage(sitk.Mask(t1, lbl_img))
+    t2_arr    = sitk.GetArrayFromImage(sitk.Mask(t2, lbl_img))
+    lbl_arr   = sitk.GetArrayFromImage(lbl_img) > 0 # Binary mask
+    cmp_arr   = sitk.GetArrayFromImage(lbl_img) # Connected components
+    lesion_arr= sitk.GetArrayFromImage(lesion) > 0
 
-    # ========= Supervoxel Segmentation =========
-    t1_arr = sitk.GetArrayFromImage(t1_spine_img)
-    t2_arr = sitk.GetArrayFromImage(t2_spine_img)
-    lbl_arr = sitk.GetArrayFromImage(lbl_img) > 0
-
-    #TODO: Maybe lower the segments - hyperparameter tuning
-
+    # Supervoxel segmentation
     n_segments = 1000
     compactness = 0.1
-    print(f"Running SLIC: n_segments={n_segments}, compactness={compactness}...")
+    print(f"\nRunning SLIC: n_segments={n_segments}, compactness={compactness}...")
     supervoxels = slic(
         t1_arr,
         n_segments=n_segments,
@@ -103,27 +88,37 @@ def clustering(patient_id, min_lesion_vox=10, min_fraction=0.1, max_voxel_diff=2
         channel_axis=None,
         start_label=1
     )
-    print(f"Generated {supervoxels.max()} supervoxels")
+    num_nodes  = int(supervoxels.max())
+    print(f"Generated {num_nodes} supervoxels")
 
     # Save supervoxels
     supervox_img = sitk.GetImageFromArray(supervoxels.astype(np.int32))
-    supervox_img.CopyInformation(t1_spine_img)
-    sitk.WriteImage(supervox_img, os.path.join(res_path, f'supervoxels_{patient_id}.nii.gz'))
+    supervox_img.CopyInformation(t1)
+    sitk.WriteImage(supervox_img, os.path.join(res_path, f'supervoxels_{num}.nii.gz'))
 
     # ========= Label Extraction =========
-    lesion_arr = sitk.GetArrayFromImage(lesion) > 0
-    num_nodes  = int(supervoxels.max())
-    sv_labels  = np.zeros(num_nodes, dtype=np.uint8)
+    sv_labels = np.zeros(num_nodes, dtype=np.uint8)
+    sv_comps = np.zeros(num_nodes, dtype=np.uint8)
+    sv_centroids = np.zeros((num_nodes, 3), dtype=np.float32)
 
     for lab in range(1, num_nodes+1):
         mask = (supervoxels == lab)
-        region_size = mask.sum()
-        if region_size == 0:
+        if not mask.any():
             continue
+
+        # lesion label
+        region_size  = mask.sum()
         lesion_count = int(lesion_arr[mask].sum())
         if lesion_count >= min_lesion_vox and (lesion_count / region_size) >= min_fraction:
             sv_labels[lab-1] = 1
-            
-    #TODO: Optimize the merging of supervoxels that contain lesion voxels
-    
-    return supervoxels, t1_arr, t2_arr, sv_labels
+
+        # connected component label
+        flat_idx = mask.argmax()
+        z, y, x = np.unravel_index(flat_idx, mask.shape)
+        sv_comps[lab-1] = cmp_arr[z, y, x]
+
+        # centroid coordinates
+        z_idx, y_idx, x_idx = np.nonzero(mask)
+        sv_centroids[lab-1] = [z_idx.mean(), y_idx.mean(), x_idx.mean()]
+
+    return supervoxels, t1_arr, t2_arr, sv_labels, sv_comps, sv_centroids
