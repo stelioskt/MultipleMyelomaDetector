@@ -77,6 +77,7 @@ def clustering(patient_id, min_lesion_vox=10, min_fraction=0.1, max_voxel_diff=2
     lesion_arr= sitk.GetArrayFromImage(lesion) > 0
 
     # ==================== Supervoxel segmentation ====================
+    #TODO: Fine-tune SLIC parameters
     n_segments = 1000
     compactness = 0.1
     print(f"\nRunning SLIC: n_segments={n_segments}, compactness={compactness}...")
