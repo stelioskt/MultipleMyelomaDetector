@@ -7,6 +7,7 @@ import SimpleITK as sitk
 from torch_geometric.data import Data
 from radiomics import featureextractor, logger
 import logging
+import time
 
 from clustering import clustering
 
@@ -25,7 +26,7 @@ def configure_radiomics(bin_width=25, spacing=None, enabled_features=None):
     extractor.disableAllFeatures()
     # Enable core feature classes
     classes = enabled_features or [
-        'firstorder', 'shape', 'glcm', 'glrlm', 'glszm', 'gldm', 'ngtdm'
+        'firstorder', 'shape', 'glcm', 'glrlm', 'glszm'     # 'gldm', 'ngtdm'
     ]
     for cls in classes:
         extractor.enableFeatureClassByName(cls)
@@ -38,10 +39,6 @@ radiomics_extractor = configure_radiomics()
 def extract_radiomics(vol, mask, extractor):
     """
     Compute radiomics features for a single volume/mask pair.
-    vol: 3D numpy array of image intensities
-    mask: 3D numpy array of binary mask (uint8)
-    extractor: PyRadiomics FeatureExtractor
-    Returns: 1D numpy array of feature values sorted by feature name
     """
     # Convert to SimpleITK images
     sitk_vol = sitk.GetImageFromArray(vol.astype(np.float32))
@@ -56,7 +53,9 @@ def extract_radiomics(vol, mask, extractor):
 
 
 def create_graph(patient_id):
+    start = time.time()
     supervoxels, t1_arr, t2_arr, sv_labels, sv_comps, sv_centroids = clustering(patient_id)
+    print(f"Clustering took {time.time() - start:.2f} seconds")
     N = int(supervoxels.max())
 
     node_feats = []
